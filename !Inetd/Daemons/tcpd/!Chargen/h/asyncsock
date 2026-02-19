@@ -1,0 +1,14 @@
+#ifndef __asyncsock_h
+#define __asyncsock_h
+
+#ifndef __kernel_h
+#include "kernel.h"
+#endif
+
+/* Clients */
+#define AsyncSocket_TASK       0
+
+extern _kernel_oserror *async_allocate(int *pollword,int sock,int client);
+extern _kernel_oserror *async_deallocate(int sock,int client);
+
+#endif

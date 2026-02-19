@@ -1,0 +1,57 @@
+#include <stdlib.h>
+#include <string.h>
+#include "kernel.h"
+
+#define BUFSIZE 1024
+#define NOSOCK  -1
+
+#define Socket_Recvfrom 0x41206
+#define Socket_Sendto   0x41209
+
+typedef unsigned short u_short;
+
+typedef struct  {
+ u_short sa_family;  /* address family */
+ char sa_data[14];  /* up to 14 bytes of direct address */
+} sockaddr;
+
+sockaddr clientaddr;
+
+int my_recvfrom(int sock, char *buf, int buf_size, int flags, sockaddr *addr, int *addr_size) {
+  _kernel_swi_regs regs;
+  _kernel_oserror *err;
+  regs.r[0] = sock;
+  regs.r[1] = (int) buf;
+  regs.r[2] = buf_size;
+  regs.r[3] = flags;
+  regs.r[4] = (int) addr;
+  regs.r[5] = (int) addr_size;
+  err = _kernel_swi(Socket_Recvfrom, &regs, &regs);
+  return regs.r[0];
+}
+
+int my_sendto(int sock, char *buf, int buf_size, int flags, sockaddr *addr, int addr_size) {
+  _kernel_swi_regs regs;
+  _kernel_oserror *err;
+  regs.r[0] = sock;
+  regs.r[1] = (int) buf;
+  regs.r[2] = buf_size;
+  regs.r[3] = flags;
+  regs.r[4] = (int) addr;
+  regs.r[5] = addr_size;
+  err = _kernel_swi(Socket_Sendto, &regs, &regs);
+  return regs.r[0];
+}
+
+int main(int argc,char *argv[]) {
+  int cc,length;
+  char buf[BUFSIZE];
+  int sock=NOSOCK;
+  sock=atoi(argv[1]);
+  cc=my_recvfrom(sock, buf, BUFSIZE, 0, &clientaddr, &length);
+  if (cc>=0) {
+    buf[cc]=0;
+    my_sendto(sock, buf, strlen(buf), 0, &clientaddr, length);
+  }
+  return 0;
+}

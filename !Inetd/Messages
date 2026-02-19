@@ -1,0 +1,19 @@
+_TaskName:Inetd
+# Messages exported from Resource File version 101
+
+# Messages for object Iconbar (class Iconbar)
+
+Iconbar|0:Inetd
+
+# Messages for object ProgInfo (class ProgInfo)
+
+ProgInfo|1:Basic server daemons
+ProgInfo|2:© W Antonia
+ProgInfo|3:0.01 (2-Jul-98)
+
+# Messages for object IMenu (class Menu)
+
+IMenu|0:Inetd
+IMenu|2:Prog Info
+IMenu|4:Show Log
+IMenu|6:Quit

@@ -1,0 +1,38 @@
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+#include "kernel.h"
+#include "syslog.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "sys/syslog.h"
+#include "socklib.h"
+#include "unixlib.h"
+
+#define BUFFERSIZE     128
+#define SERVICE        "Daytime"
+#define NOSOCK         -1
+#define DAEMON         "DaemonLog"
+
+/*static char *copyright="Daytime tcp version 0.01 ©Bill Antonia 2 July 1998";*/
+
+int main(int argc,char *argv[]) {
+  int sock=NOSOCK;
+  int cc;
+  char buf[BUFFERSIZE];
+  time_t now;
+  syslogf(DAEMON, LOG_ERR, "%s tcp starting", SERVICE);
+  sock=atoi(argv[1]);
+  (void)time(&now);
+  sprintf(buf, "%s", ctime(&now));
+  if ((cc=socketwrite(sock, buf, strlen(buf)))==-1) {
+    syslogf(DAEMON, LOG_ERR, "%s tcp error: %x %s", SERVICE, errno, "Write error");
+  }
+  if (socketclose(sock)==-1) {
+    syslogf(DAEMON, LOG_ERR, "%s tcp error: %x %s", SERVICE, errno, "Close failed");
+  }
+  syslogf(DAEMON, LOG_ERR, "%s tcp ending", SERVICE);
+  return 0;
+}

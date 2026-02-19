@@ -1,0 +1,66 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+//#include "kernel.h"
+#include "logerror.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "socklib.h"
+#include "syslog.h"
+
+#define BUFSIZE        1024
+#define SERVICE        "Quote"
+#define NOSOCK         -1
+#define DAEMON         "DaemonLog"
+
+static char *copyright="Quote tcp version 0.01 ©Bill Antonia 2 July 1998";
+
+struct sockaddr clientaddr;
+
+void service(char *buf,char *quotes) {
+  FILE *fp;
+  int i=0,j;
+  if ((fp=fopen(quotes,"r"))!=NULL) {
+    while (!feof(fp)) {
+      fgets(buf,BUFSIZE,fp);
+      i++;
+    }
+    srand((unsigned int)time(NULL));
+    j=(rand()%i)+1;
+    i=0;
+    rewind(fp);
+    while (j!=i)  {
+      fgets(buf,BUFSIZE,fp);
+      i++;
+    }
+    //memset(buf,0,BUFSIZE);
+    fgets(buf,BUFSIZE,fp);
+  }
+  else
+    strcpy(buf,"The end of the world is nigh.");
+  fclose(fp);
+  strcat(buf,"\r\n");
+}
+
+int main(int argc,char *argv[]) {
+  int cc,length;
+  char buf[BUFSIZE];
+  //struct sockaddr clientaddr;
+  int sock=NOSOCK;
+  sock=atoi(argv[1]);
+  syslogf(DAEMON,LOG_INFO,"%s udp starting",SERVICE);
+  cc=recvfrom(sock, buf, BUFSIZE, 0, &clientaddr, &length);
+  if (cc<0) {
+    syslogf(DAEMON,LOG_ERR,"udp %s recvfrom error: %x on socket %d", SERVICE, errno, sock);
+  } else {
+    service(buf,argv[2]);
+    cc=sendto(sock, buf, strlen(buf), 0, &clientaddr, length);
+    if (cc<0) {
+      syslogf(DAEMON,LOG_ERR,"udp %s sendto error: %d on socket %d sending length: %d",SERVICE,errno, sock, strlen(buf));
+    }
+  }
+  syslogf(DAEMON,LOG_INFO,"%s udp ending",SERVICE);
+  syslog_logcomplete(DAEMON);
+  return 0;
+}

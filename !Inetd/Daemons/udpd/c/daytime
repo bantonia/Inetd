@@ -1,0 +1,38 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+#include "syslog.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+//#include "sys/syslog.h"
+#include "sys/errno.h"
+#include "logerror.h"
+
+#define BUFSIZE        1024
+#define SERVICE        "Daytime"
+#define NOSOCK         -1
+#define DAEMON         "DaemonLog"
+
+static char *copyright="Daytime udp version 0.01 ©Bill Antonia 2 July 1998";
+
+int main(int argc,char *argv[]) {
+  struct sockaddr clientaddr;
+  int sock=NOSOCK;
+  int length;
+  time_t now;
+  char buf[BUFSIZE];
+  sock=atoi(argv[1]);
+  syslogf(DAEMON,LOG_INFO,"udp %s starting on socket %d",SERVICE,(int)sock);
+  if (recvfrom(sock, buf, BUFSIZE, 0, &clientaddr, &length)<0) {
+    syslogf(DAEMON,LOG_ERR,"udp %s recvfrom error: %x on socket %d", SERVICE, errno, sock);
+  } else {
+    (void)time(&now);
+    sprintf(buf,"%s",ctime(&now));
+    if ((sendto(sock, &buf, BUFSIZE, 0, &clientaddr, length))<0) {
+      syslogf(DAEMON,LOG_ERR,"udp %s sendto error: %x on socket %d",SERVICE,errno, sock);
+    }
+    syslogf(DAEMON,LOG_INFO,"udp %s service ending on socket %d",SERVICE, sock);
+    syslog_logcomplete(DAEMON);
+  }
+  return 0;
+}

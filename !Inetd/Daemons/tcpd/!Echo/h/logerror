@@ -1,0 +1,29 @@
+#ifndef __logerror_h
+#define __logerror_h
+
+#define LOG_KERN     "kern"
+#define LOG_USER     "user"
+#define LOG_MAIL     "mail"
+#define LOG_DAEMON   "daemon"
+#define LOG_AUTH     "auth"
+#define LOG_LPR      "lpr"
+#define LOG_RPC      "rpc"
+#define LOG_LOCAL0   "local0"
+#define LOG_LOCAL1   "local1"
+#define LOG_LOCAL2   "local2"
+#define LOG_LOCAL3   "local3"
+#define LOG_LOCAL4   "local4"
+#define LOG_LOCAL5   "local5"
+#define LOG_LOCAL6   "local6"
+#define LOG_LOCAL7   "local7"
+
+#define LOG_EMERG     0
+#define LOG_ALERT    31
+#define LOG_CRIT     63
+#define LOG_ERR      95
+#define LOG_WARNING 127
+#define LOG_NOTICE  159
+#define LOG_INFO    195
+#define LOG_DEBUG   223
+
+#endif

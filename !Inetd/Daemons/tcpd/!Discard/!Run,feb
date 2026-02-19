@@ -1,0 +1,3 @@
+Set Discard$Dir <Obey$Dir>
+wimpslot -min 32K -max 32K
+Run <Discard$Dir>.!RunImage %0 %1 %2

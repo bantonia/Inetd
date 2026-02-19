@@ -1,0 +1,63 @@
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+#include "kernel.h"
+#include "syslog.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "sys/syslog.h"
+#include "socklib.h"
+#include "unixlib.h"
+
+#define BUFFERSIZE     1024
+#define SERVICE        "Quote"
+#define NOSOCK         -1
+#define DAEMON         "DaemonLog"
+
+static char *copyright="Quote tcp version 0.01 ©Bill Antonia 2 July 1998";
+
+void service(char *buf,char *quotes)
+{
+  FILE *fp;
+  int i=0,j;
+  if ((fp=fopen(quotes,"r"))!=NULL)
+  {
+    while (!feof(fp))
+    {
+      fgets(buf,BUFFERSIZE,fp);
+      i++;
+    }
+    srand((unsigned int)time(NULL));
+    j=(rand()%i)+1;
+    i=0;
+    rewind(fp);
+    while (j!=i)
+    {
+      fgets(buf,1024,fp);
+      i++;
+    }
+  }
+  else
+    strcpy(buf,"The end of the world is nigh.");
+  strcat(buf,"\r\n");
+}
+
+int main(int argc,char *argv[])
+{
+  int sock=NOSOCK;
+  _kernel_oserror *err;
+  int cc;
+  char buf[BUFFERSIZE];
+  syslogf(DAEMON,LOG_INFO,"%s tcp starting",SERVICE);
+  sock=atoi(argv[1]);
+  service(buf,argv[2]);
+  if ((cc=socketwrite(sock, buf, strlen(buf)))==-1)
+    syslogf(DAEMON,LOG_ERR,"%s tcp error: %x %s",SERVICE,err->errnum,err->errmess);
+  if (socketclose(sock)==-1)
+    syslogf(DAEMON,LOG_ERR,"%s tcp error: %x %s",SERVICE,err->errnum,err->errmess);
+  syslogf(DAEMON,LOG_INFO,"%s tcp ending",SERVICE);
+  syslog_logcomplete(DAEMON);
+  return 0;
+}

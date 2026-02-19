@@ -1,0 +1,13 @@
+#ifndef __pollword_h
+#define __pollword_h
+
+#ifndef __kernel_h
+#include "kernel.h"
+#endif
+
+_kernel_oserror *pollword_allocate(int task_handle,int **pollword);
+_kernel_oserror *pollword_deallocate(int task_handle);
+_kernel_oserror *pollword_callpollword(int task_handle,int value);
+_kernel_oserror *pollword_reset(int task_handle);
+
+#endif

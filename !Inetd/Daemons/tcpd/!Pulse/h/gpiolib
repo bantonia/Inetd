@@ -1,0 +1,27 @@
+#ifndef __gpiolib_h
+#define __gpiolib_h
+
+#ifndef __kernel_h
+#include "kernel.h"
+#endif
+
+#define GPIOModule_SetPinOut    0x60040
+#define GPIOModule_SetPinIn     0x60041
+#define GPIOModule_SetPin       0x60042
+#define GPIOModule_ClearPin     0x60043
+#define GPIOModule_SetPinsOut   0x60044
+#define GPIOModule_SetPinsIn    0x60045
+#define GPIOModule_SetPins      0x60046
+#define GPIOModule_ClearPins    0x60047
+#define GPIOModule_ReadSelectRegister 0x60048
+
+_kernel_oserror * gpiomodule_set_pin_out(int gpio_num);
+_kernel_oserror * gpiomodule_set_pin_in(int gpio_pin);
+_kernel_oserror * gpiomodule_set_pin(int gpio_pin);
+_kernel_oserror * gpiomodule_clear_pin(int gpio_pin);
+_kernel_oserror * gpiomodule_set_pins_out(int gpio_pins);
+_kernel_oserror * gpiomodule_set_pins_in(int gpio_num);
+_kernel_oserror * gpiomodule_clear_pins(int gpio_num);
+unsigned int read_select_register(unsigned int reg);
+
+#endif

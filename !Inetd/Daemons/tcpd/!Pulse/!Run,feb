@@ -1,0 +1,5 @@
+Set Pulse$Dir <Obey$Dir>
+RMEnsure GPIOModule 0.01 RMLOAD System:modules.GPIOModulex
+RMEnsure GPIOModule 0.01 ERROR GPIOModule not running
+wimpslot -min 32K -max 32K
+Run <Pulse$Dir>.!RunImage %0 %1 %2 %3 %4

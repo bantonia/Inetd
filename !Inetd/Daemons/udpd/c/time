@@ -1,0 +1,42 @@
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "syslog.h"
+#include "logerror.h"
+
+
+#define BUFSIZE        1024
+#define SERVICE        "Time"
+#define UNIXEPOCH      2208988800ul
+#define DAEMON         "DaemonLog"
+#define NOSOCK         -1
+
+static char *copyright="Time udp version 0.01 ©Bill Antonia 2 July 1998";
+
+int main(int argc,char *argv[]) {
+  struct sockaddr clientaddr;
+  int sock=NOSOCK;
+  int length,cc;
+  time_t now;
+  char buf[BUFSIZE];
+  syslogf(DAEMON,LOG_INFO,"udp %s starting on socket %d",SERVICE,(int)sock);
+  sock=atoi(argv[1]);
+  cc=recvfrom(sock, buf, BUFSIZE, 0, &clientaddr, &length);
+  if (cc<0) {
+    syslogf(DAEMON,LOG_ERR,"udp %s recvfrom error: %x on socket %d", SERVICE, errno, sock);
+  } else {
+
+    (void)time(&now);
+    now=(time_t)htonl((unsigned int)(now+UNIXEPOCH));
+    if ((sendto(sock, (char *)&now, sizeof(now), 0, &clientaddr, length))<0) {
+      syslogf(DAEMON,LOG_ERR,"udp %s sendto error: %d on socket %d sending length: %d",SERVICE,errno, sock, strlen(buf));
+    }
+  }
+  syslogf(DAEMON,LOG_INFO,"udp %s udp ending on socket %d",SERVICE,(int)sock);
+  syslog_logcomplete(LOG_DAEMON);
+  return 0;
+}

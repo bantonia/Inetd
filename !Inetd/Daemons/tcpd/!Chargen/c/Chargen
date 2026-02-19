@@ -1,0 +1,206 @@
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <time.h>
+#include "kernel.h"
+#include "swis.h"
+#include "syslog.h"
+#include "sys/time.h"
+#include "sys/types.h"
+#include "sys/errno.h"
+#include "sys/socket.h"
+#include "sys/ioctl.h"
+#include "sys/syslog.h"
+#include "socklib.h"
+#include "netinet/in.h"
+#include "netdb.h"
+#include "unixlib.h"
+#include "wimp.h"
+#include "toolbox.h"
+#include "event.h"
+#include "asyncsock.h"
+#include "pollword.h"
+
+#define WimpVersion    310
+
+/*static char *copyright="Chargen tcp version 0.02 ©Bill Antonia 29 January 1999";*/
+
+static  WimpPollBlock  poll_block;
+static  MessagesFD     messages;
+static  IdBlock        id_block;
+
+static int wimp_messages[]={
+           Wimp_MQuit,
+           Wimp_MPreQuit,
+           0};
+
+static int toolbox_events[]={
+           0};
+
+#define BUFSIZE        128
+#define LINELEN        72
+#define DAEMONDIR      "<Chargen$Dir>"
+#define SERVICE        "Chargen"
+#define DAEMON         "DaemonLog"
+
+int sock=0;
+fd_set afds,rfds,wfds;
+int nfds=FD_SETSIZE;
+int task;
+int *pollword;
+int interval=0;
+char c=' ';
+
+void report_error(int errnum, char* errmess, int line) {
+  syslogf(DAEMON, LOG_ERR, "TCP Chargen error: 0x%x %s at line: %d", errnum, errmess, line);
+}
+
+void quit(void) {
+  syslogf(DAEMON, LOG_INFO, "tcp %s service ending on socket %d", SERVICE, (int)sock);
+  if (socketclose(sock)==-1)
+    report_error(errno, "socket close failure", __LINE__-1);
+  async_deallocate((int)sock, AsyncSocket_TASK);
+  pollword_deallocate(task);
+}
+
+int pollword_event(int event_code, WimpPollBlock *event, IdBlock *id_block, void *handle) {
+  int nfound=0;
+  struct timeval t;
+  pollword_reset(task);
+  t.tv_sec=0;
+  t.tv_usec=1;
+  bcopy((char *)&afds,(char *)&rfds,sizeof(rfds));
+  if ((nfound=select(nfds, &rfds, (fd_set *)0, (fd_set *)0, &t))==-1) {
+    if (errno!=EWOULDBLOCK) {
+      report_error(errno, "select failure", __LINE__-2);
+      quit();
+      exit(1);
+    }
+  }
+  if (nfound>0) {
+    if (FD_ISSET(((int)sock), &rfds)) {
+      int cc;
+      char buf[BUFSIZE];
+      cc=socketread(sock, buf, sizeof(buf));
+      if (cc==0) {
+        quit();
+        exit(0);
+      }
+    }
+  }
+  if ((event->poll_word_non_zero.poll_word_contents&0x0000ff00)==0x00000300) {
+    quit();
+    exit(0);
+  }
+  return 1;
+}
+
+int null_event(int event_code, WimpPollBlock *event, IdBlock *id_block, void *handle) {
+  int nfound;
+  _kernel_swi_regs r;
+  struct timeval t;
+  t.tv_sec=0;
+  t.tv_usec=1;
+  if (interval!=0) {
+    _kernel_swi(OS_ReadMonotonicTime, &r, &r);
+    if (r.r[0]>=interval) {
+      quit();
+      exit(0);
+    }
+  }
+  bcopy((char *)&afds, (char *)&wfds, sizeof(wfds));
+  if ((nfound=select(nfds, (fd_set *)0, &wfds, (fd_set *)0, &t))==-1) {
+    if (errno!=EWOULDBLOCK) {
+      report_error(errno, "select failure", __LINE__-2);
+      quit();
+      exit(1);
+    }
+  }
+  if (nfound>0) {
+    if (FD_ISSET(((int)sock),&wfds)) {
+      int cc;
+      int i;
+      char buf[LINELEN+2],cx;
+      buf[LINELEN]='\r';
+      buf[LINELEN+1]='\n';
+      cx=++c;
+      if (cx>'~') cx=' ';
+      for (i=0;i<LINELEN;i++) {
+        buf[i]=c++;
+        if (c>'~') c=' ';
+      }
+      c=cx;
+      if ((cc=socketwrite(sock, buf, LINELEN+2))==-1)
+        report_error(errno, "socketwrite failure", __LINE__-1);
+    }
+  }
+  return 1;
+}
+
+int quit_message(WimpMessage *message,void *handle) {
+  message=message;
+  handle=handle;
+  quit();
+  exit(0);
+  return(1);
+}
+
+int main(int argc,char *argv[]) {
+  int event_code;
+  _kernel_oserror *err;
+  _kernel_swi_regs r;
+  int on=1;
+  int timeout=0;
+  int i=2;
+  sock=atoi(argv[1]);
+  if (argc>2)
+  {
+    while (i<argc)
+    {
+      if (strcmp(argv[i],"-t")==0)
+      {
+        timeout=atoi(argv[i+1]);
+        i+=2;
+      }
+    }
+  }
+  syslogf(DAEMON, LOG_INFO, "tcp %s service starting on socket %d", SERVICE, (int)sock);
+  if (socketioctl(sock, FIOASYNC, &on)==-1) {
+    report_error(errno, "socketioctl error", __LINE__-1);
+    quit();
+    exit(1);
+  }
+  if ((err=toolbox_initialise(0, WimpVersion, wimp_messages, toolbox_events, DAEMONDIR, &messages, &id_block, 0, &task, 0))!=NULL) {
+    report_error(err->errnum, err->errmess, __LINE__-1);
+    quit();
+    exit(1);
+  }
+  if ((err=pollword_allocate(task,&pollword))!=NULL) {
+    report_error(err->errnum, err->errmess, __LINE__-1);
+    quit();
+    exit(1);
+  }
+  if ((err=async_allocate(pollword,(int)sock,AsyncSocket_TASK))!=NULL) {
+    report_error(err->errnum, err->errmess, __LINE__-1);
+    quit();
+    exit(1);
+  }
+  event_initialise(&id_block);
+  event_set_mask(0xc01900);
+  event_register_wimp_handler(-1, Wimp_ENull, null_event, 0);
+  event_register_wimp_handler(-1, Wimp_EPollWordNonZero, pollword_event, 0);
+  event_register_message_handler(Wimp_MQuit, quit_message, 0);
+  event_register_message_handler(Wimp_MPreQuit, quit_message, 0);
+  FD_ZERO(&afds);
+  FD_SET((int)sock, &afds);
+  if (timeout!=0) {
+    _kernel_swi(OS_ReadMonotonicTime,&r,&r);
+    interval=r.r[0]+timeout*100;
+  }
+  while (TRUE) {
+    event_poll_idle(&event_code, &poll_block, 0, (void *)pollword);
+  }
+  return 0;
+}
+

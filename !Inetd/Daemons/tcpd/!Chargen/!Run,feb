@@ -1,0 +1,3 @@
+Set Chargen$Dir <Obey$Dir>
+wimpslot -min 32K -max 32K
+Run <Chargen$Dir>.!RunImage %0 %1 %2

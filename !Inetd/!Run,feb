@@ -1,0 +1,21 @@
+Set Inetd$Dir <Obey$Dir>
+
+RMENSURE Syslog    0.17  RMLOAD System:modules.SysLog
+RMENSURE Syslog    0.17  ERROR  You need Syslog 0.17 or later to run !Inetd
+RMENSURE PollWord    0.03  RMLOAD <Obey$Dir>.PollWord32
+RMENSURE PollWord    0.03  ERROR  You need PollWord 0.03 or later to run !Inetd and some daemons
+RMENSURE AsyncSocket 0.01  RMLOAD <Obey$Dir>.AsyncSock
+RMENSURE AsyncSocket 0.01  ERROR  You need AsyncSocket 0.01 or later to run !Inetd and some daemons
+|RMENSURE GPIOModule 0.01  RMLOAD System:modules.GPIOModule
+|RMENSURE GPIOModule 0.01  ERROR  You need GPIOModule 0.01 or later to run some daemons
+RMENSURE Toolbox  0.00  RMLOAD System:modules.toolbox.toolbox
+RMENSURE Toolbox  1.17  ERROR You need toolbox 1.17 or later to run !Inetd
+RMENSURE Menu     0.00  RMLOAD System:modules.toolbox.menu
+RMENSURE Menu     0.13  ERROR You need menu 0.13 or later to run !Inetd
+RMENSURE Iconbar  0.00  RMLOAD System:modules.toolbox.iconbar
+RMENSURE Iconbar  1.06  ERROR You need iconbar 1.06 or later to run !Inetd
+RMENSURE ProgInfo 0.00  RMLOAD System:modules.toolbox.proginfo
+RMENSURE ProgInfo 0.04  ERROR You need proginfo 0.04 or later to run !Inetd
+Iconsprites <Obey$Dir>.!Sprites
+wimpslot -min 52K -max 52K
+Run <Inetd$Dir>.!RunImage <Inetd$Dir>.conf

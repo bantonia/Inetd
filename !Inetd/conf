@@ -1,0 +1,29 @@
+#
+# Configuration file for !Inetd. Only read on startup at present.
+#
+# <service_name> <sock_type> <proto> <flags> <user> <server_path> <args>
+#
+# Current options
+# ~~~~~~~~~~~~~~~
+# sock_type   stream or dgram (currently ignored)
+# proto       tcp or udp
+# flags       wait or nowait  (currently ignored)
+# user        username        (currently ignored)
+# server_path filepath where server can be found (no internal servers at present)
+# args        program name followed by arguments
+#
+# When each daemon is run, the socket number is passed as the first argument
+# followed by the arguments for each server.
+#
+daytime  stream tcp nowait root <Inetd$Dir>.daemons.tcpd Daytime
+daytime  dgram  udp wait   root <Inetd$Dir>.daemons.udpd Daytime
+echo     stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Echo -t 10
+echo     dgram  udp wait   root <Inetd$Dir>.daemons.udpd Echo
+qotd     stream tcp nowait root <Inetd$Dir>.daemons.tcpd Quote <Inetd$Dir>.daemons.tcpd.quotes
+discard  stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Discard -t 10
+discard  dgram  udp wait   root <Inetd$Dir>.daemons.udpd Discard
+time     stream tcp nowait root <Inetd$Dir>.daemons.tcpd Time
+time     dgram  udp wait   root <Inetd$Dir>.daemons.udpd Time
+chargen  stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Chargen -t 10
+chargen  dgram  udp nowait root <Inetd$Dir>.daemons.udpd Chargen <Inetd$Dir>.daemons.udpd.char
+

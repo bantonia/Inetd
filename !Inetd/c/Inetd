@@ -1,0 +1,441 @@
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+#include "kernel.h"
+#include "swis.h"
+#include "syslog.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/ioctl.h"
+#include "sys/errno.h"
+#include "netinet/in.h"
+#include "rpc/netdb.h"
+#include "netdb.h"
+#include "socklib.h"
+#include "unixlib.h"
+#include "wimp.h"
+#include "toolbox.h"
+#include "event.h"
+#include "wimplib.h"
+#include "logerror.h"
+#include "asyncsock.h"
+#include "pollword.h"
+/*#include "passive.h"*/
+
+#define WimpVersion    310
+
+/*static char *copyright="Inetd version 0.01 ©Bill Antonia 2 July 1998";*/
+
+static  WimpPollBlock  poll_block;
+static  MessagesFD     messages;
+static  IdBlock        id_block;
+
+static int wimp_messages[]={
+           Wimp_MQuit,
+           Wimp_MPreQuit,
+           0};
+
+#define QuitEvent 1
+#define ShowLog   2
+
+static int toolbox_events[]={
+           QuitEvent,
+           ShowLog,
+           0};
+
+#define QLEN 5
+
+int task;
+int *pollword;
+
+typedef struct socket_node socket_node;
+
+#define DAEMON         "DaemonLog"
+#define NOSOCK -1
+
+struct socket_node {
+  int sock;
+  char *service;
+  int sock_type;
+  int proto;
+  char *flags;
+  char *user;
+  char *path;
+  char *progname;
+  char *args;
+  socket_node *next;
+};
+
+char *config_stream[]={"stream", "dgram", 0};
+char *config_protocol[]={"tcp", "udp", 0};
+char *config_flags[]={"wait", "nowait", 0};
+
+struct sockaddr fsin, cored_fsin;
+fd_set afds, rfds;
+int nfds=0;
+socket_node *socket_head=NULL;
+
+static unsigned short portbase=0;
+
+_kernel_oserror atoi_err={0, "atoi error"};
+
+void report_error(int errnum, char* errmess, int line) {
+  syslogf(DAEMON, LOG_ERR, "Inetd error: 0x%x %s at line: %d", errnum, errmess, line);
+}
+
+void report_error_riscos(_kernel_oserror *err, int line) {
+  syslogf(DAEMON, LOG_ERR, "Inetd error: 0x%x %s at line: %d", err->errnum, err->errmess, line);
+}
+
+int passivesock(char *service, char *protocol, int qlen) {
+  int optval=1;
+  struct servent  *pse;
+  struct protoent *ppe;
+  struct sockaddr_in sin;
+  int s=NOSOCK;
+  int type;
+  bzero((char *)&sin,sizeof(sin));
+  sin.sin_family=AF_INET;
+  sin.sin_addr.s_addr=(u_int32_t)htonl(INADDR_ANY);
+  if ((pse=getservbyname(service, protocol))!=NULL)
+    sin.sin_port=htons(ntohs(pse->s_port)+portbase);
+  else
+    if ((sin.sin_port=htons(atoi(service)))==0) {
+      report_error(errno, "atoi", __LINE__-1);
+      return NOSOCK;
+    }
+  if ((ppe=getprotobyname(protocol))==NULL) {
+    report_error(errno, "getprotobyname", __LINE__-1);
+    return NOSOCK;
+  }
+  if (strcmp(protocol, "udp")==0)
+    type=SOCK_DGRAM;
+  else
+    type=SOCK_STREAM;
+  if ((s=socket(AF_INET, type, ppe->p_proto))<0) {
+    report_error(errno, "socket", __LINE__-1);
+    return NOSOCK;
+  } else {
+    if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (unsigned char *)&optval, sizeof(int))<0) {
+      report_error(errno, "setsockopt", __LINE__-1);
+      if (socketclose(s)<0)
+        report_error(errno, "close", __LINE__-1);
+      return NOSOCK;
+    } else {
+      if (bind(s, (struct sockaddr *) &sin, sizeof(sin))<0) {
+        report_error(errno, "bind", __LINE__-1);
+        if (socketclose(s)<0)
+          report_error(errno, "close", __LINE__-1);
+        return NOSOCK;
+      } else {
+        if (type==SOCK_STREAM && (listen(s, qlen))<0) {
+          report_error(errno, "listen", __LINE__-1);
+          if (socketclose(s)<0)
+            report_error(errno, "close", __LINE__-1);
+          return NOSOCK;
+        }
+      }
+    }
+  }
+  return s;
+}
+
+int passiveUDP(char *service) {
+  return passivesock(service, "udp", 0);
+}
+
+int passiveTCP(char *service, int qlen) {
+  return passivesock(service, "tcp", qlen);
+}
+
+socket_node *new_node(int sock, char *service, int type, int proto, char *flags, char *user, char *path, char *progname, char *args){
+  socket_node *ptr;
+  ptr=(socket_node *)malloc(sizeof(socket_node));
+  ptr->service=(char *)malloc(strlen(service)+1);
+  ptr->sock=sock;
+  ptr->sock_type=type;
+  ptr->proto=proto;
+  strcpy(ptr->service,service);
+  ptr->flags=(char *)malloc(strlen(flags)+1);
+  strcpy(ptr->flags,flags);
+  ptr->user=(char *)malloc(strlen(user)+1);
+  strcpy(ptr->user,user);
+  ptr->path=(char *)malloc(strlen(path)+1);
+  strcpy(ptr->path,path);
+  ptr->progname=(char *)malloc(strlen(progname)+1);
+  strcpy(ptr->progname,progname);
+  ptr->args=(char *)malloc(strlen(args)+1);
+  strcpy(ptr->args,args);
+  ptr->next=NULL;
+  return ptr;
+}
+
+void link(socket_node **head, socket_node *ptr) {
+  ptr->next=*head;
+  *head=ptr;
+}
+
+char *strtolower(char *s) {
+  char *p=s;
+  while (*p!=0) {
+    *p=tolower(*p);
+    p++;
+  }
+  return s;
+}
+
+void quit(void) {
+  socket_node *ptr;
+  while (socket_head!=NULL) {
+    ptr=socket_head->next;
+    async_deallocate((int)(socket_head->sock), AsyncSocket_TASK);
+    if (close(socket_head->sock)<0)
+      report_error(errno, "close", __LINE__-1);
+    free(socket_head->service);
+    free(socket_head->flags);
+    free(socket_head->user);
+    free(socket_head->path);
+    free(socket_head->progname);
+    free(socket_head->args);
+    free(socket_head);
+    socket_head=ptr;
+  }
+  pollword_deallocate(task);
+}
+
+int quit_message(WimpMessage *message, void *handle) {
+  message=message;
+  handle=handle;
+  quit();
+  exit(0);
+  return(1);
+}
+
+int quit_event(int event_code, ToolboxEvent *event, IdBlock *id_block, void *handle) {
+  event_code=event_code;
+  event=event;
+  id_block=id_block;
+  handle=handle;
+  quit();
+  exit(0);
+  return(1);
+}
+
+int show_log(int event_code, ToolboxEvent *event, IdBlock *id_block, void *handle) {
+  int newtask;
+  _kernel_oserror *err;
+  if ((err=wimp_start_task("Filer_OpenDir <SysLog$LogDir>", &newtask))!=NULL)
+    report_error_riscos(err, __LINE__-1);
+  return 1;
+}
+
+int pollword_event(int event_code, WimpPollBlock *event, IdBlock *id_block, void *handle) {
+  int alen, newtask, nfound=0;
+  _kernel_oserror *err;
+  struct timeval t;
+  int socket_descriptor=*pollword;
+  pollword_reset(task);
+  t.tv_sec=0;
+  t.tv_usec=1;
+  FD_ZERO(&rfds);
+  bcopy((char *)&afds, (char *)&rfds, sizeof(rfds));
+  if ((nfound=select(nfds, &rfds, (fd_set *)0, (fd_set *)0, &t))<0) {
+    switch (errno) {
+      case EWOULDBLOCK: break;
+      default: report_error(errno, "select", __LINE__-3);
+               quit();
+               exit(1);
+               break;
+    }
+  }
+  if (nfound>0) {
+    socket_node *ptr=socket_head;
+    int count=0;
+    while (ptr!=NULL) {
+      switch (ptr->proto) {
+        case IPPROTO_TCP: if (FD_ISSET(((int)ptr->sock), &rfds)) {
+                            char command[256];
+                            int ssock;
+                            alen=sizeof(fsin);
+                            if ((ssock=accept(ptr->sock, &fsin, &alen))<0) {
+                              report_error(errno, "accept", __LINE__-1);
+                              quit();
+                              exit(1);
+                            } else {
+                              sprintf(command, "%s.%s %d %s -task tcp_%s", ptr->path, ptr->progname, (int)ssock, ptr->args, ptr->progname);
+                              if ((err=wimp_start_task(command, &newtask))!=NULL)
+                                report_error_riscos(err, __LINE__-1);
+                              }
+                              count++;
+                            }
+                            break;
+        case IPPROTO_UDP: if (FD_ISSET(((int)ptr->sock), &rfds)) {
+                            char command[256];
+                            sprintf(command, "%s.%s %d %s -task udp_%s", ptr->path, ptr->progname, (int)ptr->sock, ptr->args, ptr->progname);
+                            if ((err=wimp_start_task(command, &newtask))!=NULL)
+                              report_error_riscos(err, __LINE__-1);
+                              count++;
+                            }
+                            break;
+      }
+      ptr=ptr->next;
+      if (count==nfds)
+        break;
+    }
+  }
+  return 1;
+}
+
+int check_string(const char *p, char *array[]) {
+  char s[20];
+  int i=0;  
+  strcpy(s, p);
+  strtolower(s);
+  while (array[i]!=0) {
+    if (strcmp(s, array[i])==0)
+      return TRUE;
+    i++;
+  }
+  return FALSE;
+}
+
+void config_error(int line, char *string, char *mess) {
+  syslogf(LOG_DAEMON, LOG_ERR, "Inetd config error at line %d: %s%s", line, string, mess);
+}
+
+int exists(char *s) {
+  _kernel_swi_regs r;
+  r.r[0]=23;
+  r.r[1]=(int)s;
+  _kernel_swi(OS_File, &r, &r);
+  return r.r[0];
+}
+
+int first_char(char *s, char c) {
+  char *p=s;
+  while (*p!=0) {
+    if (*p!=' ') {
+      if (*p==c)
+        return TRUE;
+    }
+    p++;
+  }
+  if (*p==c)
+    return TRUE;
+  return FALSE;
+}
+
+_kernel_oserror file_error={0, "Could not open daemon configuration file"};
+
+int main(int argc, char *argv[]) { 
+  int event_code, n;
+  _kernel_oserror *err;
+  FILE *fp;
+  int sock;
+  char buffer[1024];
+  char service[20], socket_type[10], protocol[8], flags[8], user[20], path[64], progname[12], args[256];
+  int line=0;
+  if ((err=toolbox_initialise(0, WimpVersion, wimp_messages, toolbox_events, "<Inetd$Dir>", &messages, &id_block, 0, &task, 0)) != NULL) {
+    report_error_riscos(err, __LINE__-1);
+    exit(1);
+  }
+  if ((err=pollword_allocate(task, &pollword))!=NULL) {
+    report_error_riscos(err, __LINE__-1);
+    exit(1);
+  }
+/*???????????????????????
+  xsocket_gettsize(&nfds);*/
+  FD_ZERO(&afds);
+  if ((fp=fopen(argv[1], "r"))==NULL) {
+    report_error_riscos(&file_error, __LINE__-1);
+    exit(1);
+  }
+  while (!feof(fp)) {
+    int on=1;
+    service[0]=0;
+    protocol[0]=0;
+    flags[0]=0;
+    user[0]=0;
+    path[0]=0;
+    progname[0]=0;
+    args[0]=0;
+    memset(buffer,0,1024);
+    fgets(buffer,1024,fp);
+    n=sscanf(buffer, "%s%s%s%s%s%s%s%*[ ]%[^]]", service, socket_type, protocol, flags, user, path, progname, args);
+    if (!first_char(buffer, '#') && strlen(service)!=0) {
+      int correct=TRUE;
+      if (check_string(socket_type, config_stream)!=TRUE) {
+        correct=FALSE;
+        config_error(line, socket_type, ", Unknown or unsupported socket type.");
+      } else {
+        if (check_string(protocol, config_protocol)!=TRUE) {
+          correct=FALSE;
+          config_error(line, protocol, ", Unknown or unsupported protocol.");
+        } else {
+          if (check_string(flags, config_flags)!=TRUE) {
+            correct=FALSE;
+            config_error(line, flags, ", Unknown or unsupported flag.");
+          } else {
+            char file[256];
+            sprintf(file, "%s.%s", path, progname);
+            if (exists(file)==0) {
+              correct=FALSE;
+              config_error(line, file, ", Daemon does not exist.");
+            }
+          }
+        }
+      }
+      if (correct) {
+        if (strcmp(strtolower(protocol), "tcp")==0) {
+          sock=passiveTCP(service, QLEN);
+          if (sock!=NOSOCK) {
+            if ((err=async_allocate(pollword, (int)sock, AsyncSocket_TASK))!=NULL)
+              config_error(line, service, ", tcp daemon unavailable, pollword not registered with AsyncSocket.");
+            else {
+              if (socketioctl(sock, FIOASYNC, (unsigned char *)&on)<0)
+                config_error(line, service, ", tcp daemon unavailable, socket not set into asynchrous mode.");
+              else {
+                link(&socket_head, new_node(sock, service, SOCK_STREAM, IPPROTO_TCP, flags, user, path, progname, args));
+                FD_SET(((int)sock), &afds);
+                if (((int)sock)>nfds) nfds=(int)sock;
+              }
+            }
+          } else
+              config_error(line, service, ", tcp daemon unavailable, socket not allocated.");
+        }
+        if (strcmp(strtolower(protocol), "udp")==0) {
+          sock=passiveUDP(service);
+          if (sock!=NOSOCK) { 
+            if ((err=async_allocate(pollword, (int)sock, AsyncSocket_TASK))!=NULL)
+              config_error(line, service, ", udp daemon unavailable, pollword not registered with AsyncSocket.");
+            else {
+              if (socketioctl(sock, FIOASYNC, (unsigned char *)&on)<0)
+                config_error(line,service, ", udp daemon unavailable, socket not set into asynchrous mode.");
+              else {
+                link(&socket_head, new_node(sock, service, SOCK_DGRAM, IPPROTO_UDP, flags, user, path, progname, args));
+                FD_SET(((int)sock), &afds);
+                if (((int)sock)>nfds) nfds=(int)sock;
+              }
+            }
+          } else
+              config_error(line, service, ", udp daemon unavailable, socket not allocated.");
+        }
+      }
+    }
+    line++;
+  }
+  fclose(fp);
+  nfds++;
+  event_initialise(&id_block);
+  event_set_mask(0xc01901);
+  event_register_wimp_handler(-1, Wimp_EPollWordNonZero, pollword_event, 0);
+  event_register_toolbox_handler(-1, QuitEvent, quit_event, 0);
+  event_register_toolbox_handler(-1, ShowLog, show_log, 0);
+  event_register_message_handler(Wimp_MQuit, quit_message, 0);
+  event_register_message_handler(Wimp_MPreQuit, quit_message, 0);
+  syslogf(DAEMON, LOG_INFO, "Inetd starting");
+  while (TRUE)
+    event_poll(&event_code, &poll_block, (void *)pollword);
+  return 0;
+}

@@ -1,0 +1,29 @@
+#include <stdlib.h>
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "syslog.h"
+#include "logerror.h"
+
+#define BUFSIZE     1024
+#define SERVICE     "Discard"
+#define NOSOCK      -1
+#define DAEMON      "DaemonLog"
+
+static char *copyright="Discard udp version 0.01 ©Bill Antonia 2 July 1998";
+
+int main(int argc,char *argv[]) {
+  int sock=NOSOCK;
+  struct sockaddr clientaddr;
+  int length,cc;
+  char buf[BUFSIZE];
+  syslogf(DAEMON,LOG_INFO,"udp %s starting on socket %d",SERVICE,(int)sock);
+  sock=atoi(argv[1]);
+  cc=recvfrom(sock, buf, BUFSIZE, 0, &clientaddr, &length);
+  if (cc<0) {
+    syslogf(DAEMON,LOG_ERR,"udp %s recvfrom error: %x on socket %d", SERVICE, errno, sock);
+  }
+  syslogf(DAEMON,LOG_INFO,"udp %s udp ending on socket %d",SERVICE,(int)sock);
+  syslog_logcomplete(DAEMON);
+  return 0;
+}

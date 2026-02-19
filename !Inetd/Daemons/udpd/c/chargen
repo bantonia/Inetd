@@ -1,0 +1,63 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "kernel.h"
+#include "logerror.h"
+#include "sys/types.h"
+#include "sys/socket.h"
+#include "sys/errno.h"
+#include "socklib.h"
+#include "syslog.h"
+
+#define LINELEN 72
+#define SERVICE "Chargen"
+#define NOSOCK  -1
+#define DAEMON  "DaemonLog"
+
+static char *copyright="Chargen udp version 0.01 ©Bill Antonia 2 July 1998";
+
+int main(int argc,char *argv[]) {
+  int length,i,n;
+  char buf[LINELEN+2],c=' ';
+  struct sockaddr clientaddr;
+  int sock=NOSOCK;
+  FILE *fp;
+  sock=atoi(argv[1]);
+  syslogf(DAEMON,LOG_INFO,"udp %s service starting on socket %d",SERVICE, sock);
+  if (argc==3) {
+    if ((fp=fopen(argv[2],"rb+"))!=NULL) {
+      char cx;
+      c=fgetc(fp);
+      cx=c;
+      cx++;
+      if (cx>'~') cx=' ';
+      rewind(fp);
+      fputc(cx,fp);
+      fclose(fp);
+    } else {
+      if ((fp=fopen(argv[2],"wb"))!=NULL) {
+        fputc(c+1,fp);
+        fclose(fp);
+      } else {
+        syslogf(DAEMON,LOG_ERR,"udp %s Failed to open file",SERVICE);
+      }
+    }
+  }
+  n=recvfrom(sock, buf, LINELEN+2, 0, &clientaddr, &length);
+  if (n<0) {
+    syslogf(DAEMON,LOG_ERR,"udp %s recvfrom error: %x on socket %d", SERVICE, errno, sock);
+  } else {
+    buf[LINELEN]='\r';
+    buf[LINELEN+1]='\n';
+    for (i=0;i<LINELEN;i++) {
+      buf[i]=c++;
+      if (c>'~') c=' ';
+    }
+    if ((sendto(sock, buf, LINELEN+2, 0, &clientaddr, length))<0) {
+      syslogf(DAEMON,LOG_ERR,"udp %s sendto error: %x on socket %d",SERVICE,errno, sock);
+    }
+    syslogf(DAEMON,LOG_INFO,"udp %s service ending on socket %d",SERVICE, sock);
+    syslog_logcomplete(DAEMON);
+  }
+  return 0;
+}
