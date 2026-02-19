@@ -1,0 +1,16 @@
+#include "syslog.h"
+
+int main(void)
+{
+    int fred = 999;
+    char logname[]="Test";
+
+    syslog_logmessage("Test","testing 123",123);
+    syslogf(logname,23,"my %s are dim! %d", "eyes", 234);
+    syslogf(logname,23,"log level = %d", syslog_getloglevel(logname));
+    syslogf(logname,23,"xgetlevel = %d", xsyslog_getloglevel(logname,&fred));
+    syslogf(logname,23,"log level = %d", fred);
+    syslogf(logname,23,"error message = %s", syslog_readerrormessage(60));
+    syslog_logcomplete("Test");
+    return 0;
+}

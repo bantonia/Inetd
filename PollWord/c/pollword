@@ -1,0 +1,47 @@
+#include "kernel.h"
+
+#define NULL 0
+
+#define PollWord_Allocate     0x52040
+#define PollWord_Deallocate   0x52041
+#define PollWord_CallPollWord 0x52042
+
+_kernel_oserror *pollword_allocate(int task_handle,int **pollword)
+{
+  _kernel_swi_regs r;
+  _kernel_oserror *err;
+  r.r[0]=task_handle;
+  if ((err=_kernel_swi(PollWord_Allocate,&r,&r))!=NULL)
+  {
+    /**pollword=NULL;*/
+    return err;
+  }
+  *pollword=(int *)r.r[0];
+  return NULL;
+}
+
+_kernel_oserror *pollword_deallocate(int task_handle)
+{
+  _kernel_swi_regs r;
+  _kernel_oserror *err;
+  r.r[0]=task_handle;
+  if ((err=_kernel_swi(PollWord_Deallocate,&r,&r))!=NULL)
+    return err;
+  return NULL;
+}
+
+_kernel_oserror *pollword_callpollword(int task_handle,int value)
+{
+  _kernel_swi_regs r;
+  _kernel_oserror *err;
+  r.r[0]=task_handle;
+  r.r[1]=value;
+  if ((err=_kernel_swi(PollWord_CallPollWord,&r,&r))!=NULL)
+    return err;
+  return NULL;
+}
+
+_kernel_oserror *pollword_reset(int task_handle)
+{
+  return pollword_callpollword(task_handle,0);
+}

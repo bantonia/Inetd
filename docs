@@ -1,0 +1,310 @@
+Documentation
+~~~~~~~~~~~~~
+1. PollWord Module
+2. AsyncSocket Module
+3. !Inetd WimpTask
+
+###############################################################################
+
+1. PollWord Module
+~~~~~~~~~~~~~~~~~~
+Introduction
+~~~~~~~~~~~~
+
+The purpose of the PollWord module is to allow wimptasks or interrupt
+routines, to call wimptasks who have registered a with the PollWord module.
+This enables a wimptask to sleep until called through its poll word. The
+contents of the poll word could be an integer or a pointer to a structure
+(depending upon the target application.)
+
+The SWI and Error numbers used in the PollWord module have now been
+registered so may be freely used and distributed.
+
+SWI interface
+~~~~~~~~~~~~~
+
+PollWord_Allocate     0x52040
+~~~~~~~~~~~~~~~~~
+On Entry
+R0=Task handle
+
+On Exit
+R0=Pointer to poll word or if V flag set a pointer to an error block
+
+Error 0x815804,"A Pollword is already allocated to this task"
+Error 0x815805,"Could not allocate a poll word location"
+
+PollWord_Deallocate   0x52041
+~~~~~~~~~~~~~~~~~~~
+On Entry
+R0=Task handle
+
+On Exit
+R0=Preserved or if V flag set a pointer to an error block
+
+Error 0x815806,"Task not managed by PollWord"
+
+PollWord_CallPollWord 0x52042
+~~~~~~~~~~~~~~~~~~~~~
+On Entry
+R0=Task handle
+R1=Value to store in poll word of task
+
+On Exit
+R0=Preserved or if V flag set a pointer to an error block
+R1=Preserved
+
+Error 0x815806,"Task not managed by PollWord"
+
+Other error messages
+0x815800,"Memory for PollWord Module not allocated"
+0x815801,"PollWord Module cannot be relocated"
+0x815802,"PollWord Module in use"
+0x815803,"Unknown PollWord SWI"
+
+C interface
+~~~~~~~~~~~
+
+pollword_allocate, pollword_deallocate and pollword_reset should only be used
+from within the task to be called. pollword_callpollword can be used from any
+task or interrupt routine to call the registered task.
+
+  pollword_allocate
+  ~~~~~~~~~~~~~~~~~
+  
+To register a task with the PollWord module. Returns with a pointer to
+the allocated poll word and NULL for _kernel_oserror. If an error occurs,
+the poll word pointer is unchanged and _kernel_oserror points to an error
+block.
+
+_kernel_oserror *pollword_allocate(int task_handle,int **pollword);
+
+  pollword_deallocate
+  ~~~~~~~~~~~~~~~~~~~
+
+To unregister a task with the PollWord module. Returns NULL for _kernel_oserror
+if success or a pointer to an error block. This call is not really required as
+the PollWord module checks Service_WimpCloseDown services for tasks it knows
+about. However it does not trap alt break terminations. If anyone knows how to
+do this please let me know.
+
+_kernel_oserror *pollword_deallocate(int task_handle);
+
+  pollword_callpollword
+  ~~~~~~~~~~~~~~~~~~~~~
+
+Changes the contents of a tasks poll word to value. Returns NULL for
+_kernel_oserror if success or a pointer to an error block.
+
+_kernel_oserror *pollword_callpollword(int task_handle,int value);
+
+  pollword_reset
+  ~~~~~~~~~~~~~~
+
+Variation on pollword_callpollword except the value passed is 0.
+Returns NULL for _kernel_oserror if success or a pointer to an error block.
+
+_kernel_oserror *pollword_reset(int task_handle);
+
+###############################################################################
+
+2. AsyncSocket Module
+~~~~~~~~~~~~~~~~~~~~~
+Now 0.02
+
+0.01 Stupid error, did not take into account that other sockets may be
+     asynchrous! Worked with RiscOS 3.50 and above but not with RiscOS 3.10
+     and 3.11. Possibly, OS_Claim in RiscOS 3.1? places new handlers at the
+     beginning of the list while 3.50 and above places them at the end.
+
+Introduction
+~~~~~~~~~~~~
+
+The AsyncSocket module was written to allow wimptasks which use TCP/IP
+sockets to be paged in only when an Internet Event occurs on one of their
+sockets. To do this, this module changes the pollword of the selected wimp
+task. Therefore the PollWord module is required for the AsynSocket module to
+function.
+
+The SWI and Error numbers used in the AsyncSocket module have now been
+registered so may be freely used and distributed.
+
+SWI interface
+~~~~~~~~~~~~~
+
+AsyncSocket_Allocate 0x52080
+~~~~~~~~~~~~~~~~~~~~
+On Entry
+R0=Address of pollword of wimp task
+R1=Socket number
+R2=Client type
+
+Client types
+Must be 0 at present for wimptasks. No other type currently supported in
+version 0.01 but plan to support callbacks etc at some point.
+
+On Exit
+R0=Preserved or if V flag set a pointer to an error block
+R1=Preserved
+R2=Preserved
+
+Error 0x815825,"AsyncSocket currently only support tasks"
+Error 0x815826,"Asyncrous socket value out of range"
+Error 0x815827,"Could not allocate asynchrous socket location, in use"
+
+AsyncSocket_Deallocate 0x52081
+~~~~~~~~~~~~~~~~~~~~~~
+On Entry
+R0=Address of pollword of wimp task
+R1=Client type
+
+On Exit
+R0=Preserved or if V flag set a pointer to an error block
+R1=Preserved
+
+Error 0x815828,"Could not deallocate asynchrous socket location, not in use"
+
+Other error messages
+0x815820,"AsyncSocket Manager memory not allocated"
+0x815821,"AsyncSocket Manager irq not claimed"
+0x815822,"AsyncSocket module still in use"
+0x815823,"AsyncSocket module memory release failure"
+0x815824,"Unknown AsyncSocket SWI"
+
+When an internet event occurs, the memory at the address of the pollword for
+the respective socket is changed to reflect....
+
+byte 0 Socket number
+byte 1 Internet event subcode
+byte 2 unused (will be 0)
+byte 3 unused (will be 0)
+
+Internet event subcode
+1 Socket has input waiting to be read
+2 Urgent event has occured
+3 Socket connection is broken
+4 a RevARP server has replied to a RevARP request
+The last one is not supported as yet so don't do RevARP requests!
+
+C Interface
+~~~~~~~~~~~
+
+  async_allocate
+  ~~~~~~~~~~~~~~
+
+To register a pollword and its associated socket number and client type with
+the AsyncSocket module. Returns NULL for if no error else an pointer to a
+_kernel_oserror error block. Currently, the only accepted client value is 0,
+for a wimptask. Support for callbacks will be add in due course I hope.
+
+
+_kernel_oserror *async_allocate(int *pollword,int sock,int client);
+
+  async_deallocate
+  ~~~~~~~~~~~~~~~~
+Unregisters a socket with AsyncSocket. The client value must be the same as
+that given in the registration.
+
+_kernel_oserror *async_deallocate(int sock,int client);
+
+###############################################################################
+
+3. !Inetd WimpTask
+~~~~~~~~~~~~~~~~~~
+Introduction
+~~~~~~~~~~~~
+
+!Inetd is a wimptask which accepts TCP and UDP connections on behalf of
+servers for which it has been configured. As each connection is made, a new
+process is run to service that connection. Processes which are long lived are
+wimptasks which poll frequently to enable other wimptasks to run. Processes
+which are short lived never poll and only exist fleetingly halting !Inetd,
+!Inetd continues after the call has finished. Errors are logged using !SysLog
+and the SysLog module.
+
+Configuration
+~~~~~~~~~~~~~
+
+!Inetd.conf file
+This is the equivalent to /etc/inetd.conf found on unix/linux machines. There
+are some differences in that filenames and paths are in accordance with
+RiscOS, some values are ignored and when called, the argument list includes
+the socket number as the first argument after the program name followed by
+the arguments in the conf file. Comments can be included by inserting a #
+character at the beginning of a line. Comments cannot be added at the end of
+a line setting up the parameters of a daemon.
+
+eg arguments for a daemon
+chargen stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Chargen -t 10
+would would call the process by <Inetd$Dir>.daemons.tcpd.!Chargen 1026 -t 10
+if the socket number for the connection was 1026.
+
+The arguments for a wimptask would be picked up by the !Run file as
+
+%0  would be  "1026"
+%1  would be  "-t"
+%2  would be  "10"
+
+and in a C program/wimptask
+
+argv[1]  would be  "1026"
+argv[2]  would be  "-t"
+argv[3]  would be  "10"
+
+stream/dgram is unused but is present to be consistent with unix/linux.
+
+wait/nowait is unused but again must be included. The current values reflect
+the type of daemon being used, nowait-wimptask, wait-ordinary task.
+
+user ie root, not used but must be included.
+
+The above may be used in later versions of !Inetd.
+
+server-path does not have the option of internal at present. All daemons run
+from backing store (could be ramdrive to make it faster).
+
+Errors
+~~~~~~
+Errors are trapped and logged using the SysLog 0.17 module by DoggySoft
+Ltd. So errors may not be apparent unless the application crashes. I've not
+seen it do it yet but there is always a first time, so look at the daemon log
+file regularly.
+
+Daemons
+~~~~~~~
+The daemons supplied include
+echo    tcp and udp
+chargen tcp and udp
+qotd    tcp only
+daytime tcp and udp
+discard tcp and udp
+time    tcp and udp
+
+The tcp echo, chargen and discard daemons all except  a -t option to timeout
+the connection, measured in seconds. The echo and discard daemons will close
+the connection if no response by the client is given within the time allowed.
+The chargen daemon will timeout at the alloted time interval. If no -t option
+is provided then the timeout defaults to 0 which means the daemon will
+continue until the client breaks the connection.
+(There must be a space between arguments and their parameters)
+
+eg chargen stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Chargen -t 10
+   Timeout the connection after 10 seconds.
+
+   chargen stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Chargen -t 0
+   Wait until the connection is broken by the client.
+
+   chargen stream tcp nowait root <Inetd$Dir>.daemons.tcpd !Chargen
+   As above, wait until the connection is broken.
+
+The tcp qotd and udp chargen daemons both expect a filename with full path as
+an argument for their data, udp chargen will create it's file if the file is
+not present.
+
+SysLog levels used throughout are as follows
+Errors   95
+Info    195
+The default threashold has been left as 128.
+Log file is "daemon"
+
+

@@ -1,0 +1,594 @@
+============================================================================
+SysLog Documentation
+----------------------------------------------------------------------------
+Version: 0.20
+Authors: Jon Ribbens <jon@doggysoft.co.uk>
+         Tom Hughes <tom@compton.nu>
+
+(c) DoggySoft Ltd., 1995, 1996, 1997
+(c) Tom Hughes, 2002, 2003
+
+This program is Freeware and may be freely distributed so long as it is
+not charged for, and none of the files are changed or removed. It may be
+included with a commercial program which is charged for. There is no
+warranty, express or implied. DoggySoft Ltd. is not liable for any loss
+or damages caused by the use or misuse of this program.
+
+Version 0.18 and later were produced by Tom Hughes <tom@compton.nu> and
+all queries about these versions should be directed to him in the first
+instance.
+
+Things done:
+  * facility to insert arbitrary line
+  * considered format of datestamp
+  * implemented backoff system for errors writing to logs (partly a bugfix)
+  * fixed bug which left files open on errors (e.g. disk full)
+  * added Indent/UnIndent/NoIndent
+  * do 'temporary logs' thingy for Termite session logs
+  * implement log truncation at specified maximum size
+  * read <SysLog$Dir> once and once only at startup
+  * do automatic tidy-up of 'temporary logs'
+  * fixed bug which corrupted the very last line in the options file
+  * get allocation for SWI chunk and module name and OS commands
+  * user options to disable session logs
+  * added "*" line in options file to specify default values
+  * reserve disk space option
+  * make entry point use two-layer task, so RMEnsuring works
+  * add *SysLog ON|OFF and *SysLog <log> <new priority>
+  * LogData routine to log a block of hex data (e.g. IP packets)
+  * add debugf routine for assembler people
+  * add C front-end for C people
+  * added SysLog_ReadErrorMessage
+  * added %<reg>p and %<reg>a to LogFormatted
+  * fixed order of %<reg>a (it was backwards)
+  * made log buffer size dependent on logging level
+  * made log buffer get de-allocated after ten minutes
+  * added SysLog_LogComplete
+  * made buffer size be recalculated when log level is changed
+  * made setting log level also apply to session logs of that log
+  * fixed tidying up of stray session logs (sometimes missed some)
+  * fixed a few problems with sessions
+0.15
+  * termination of strings is now by zero-byte or line-feed
+0.16
+  * add log_forget and call it in CloseSessionLog
+0.17
+  * allow CR as a string terminator
+  * automatically create 'Old' directory on startup
+  * added 'IRQ mode'
+0.18
+  * made SysLog module 26/32 bit neutral
+  * added o.syslog32 to provide an APCS-32 veneer to the SWI calls
+0.19
+  * fixed o.syslog32 so that it really is an APCS-32 veneer
+0.20
+  * fixed syslog command to recognise end of log name correctly
+
+To do:
+  * add expression evaluation to LogFormatted
+  * add optional checking of pointer validity
+  * add 'features flags'
+
+============================================================================
+Rationale
+----------------------------------------------------------------------------
+
+Termite is currently lacking in logging facilities. In fact, most
+communications software for the Arc is rather poor at logging. This module
+is designed to make it easy for comprehensive logging to be added to any
+RISC OS program.
+
+The logging level can be altered by the user for individual log files, and
+buffering is used to speed logging, so it is safe for programs to log large
+quantities of data, provided that they use sensible priorities for each type
+of message. The logs are also automatically kept to user-specified maximum
+lengths, so there is no need to worry about filling up the user's hard disk.
+
+Separate log files are used for each application, on the basis that such
+segregation of information makes it much easier for the user to find what
+they're looking for.
+
+A back-off system is used for dealing with errors when writing to logs. Each
+error is logged in the "SysLog" log, and the offending log is marked as
+"dead". SysLog will then not attempt to write to that log again for one
+second. If we again get an error writing to the log, we multiply the
+"back-off" time by 1.5, and again mark the log as dead. The back-off time is
+not allowed to grow longer than ten minutes.
+
+
+============================================================================
+Session logs
+----------------------------------------------------------------------------
+
+Usually, log entries are stored strictly chronologically. Sometimes, though,
+it may be more useful to store them grouped by 'session'. For example,
+NewsBite can have several incoming NNTP connections at once. It is nice to
+group the log messages that are coming from each separate connection
+together. This can be done using SysLog_OpenSessionLog.
+
+SysLog_OpenSessionLog creates a specially-named temporary log file. The log
+entries for the session are stored in this log file. When the temporary log
+file is closed using SysLog_CloseSessionLog, this data is appended in one
+chunk to the end of the main log.
+
+SysLog checks for stray temporary log files when it initialises and
+finalises, and appends them to the relevant logs. This copes with the
+situation where an application crashes or otherwise exits without calling
+SysLog_CloseSessionLog.
+
+
+============================================================================
+Priorities
+----------------------------------------------------------------------------
+
+Message priorities can be in the range 0 to 255, with 0 being the highest
+priority and 255 being the lowest. Unless otherwise specified by the user,
+only messages with priorities of less than 125 are stored in the log files.
+You should therefore think about what things the user is likely to want to
+have logged by default, and ensure that these things are logged at
+a priority of 124 or less.
+
+The priority of errors often depends on how significant the consequences of
+the error are, not what the cause of it is. e.g. sometimes "out of memory"
+will be an extremely important unrecoverable error (because the program
+can't start up), and sometimes it will be unimportant (because the program
+can use disk instead, or maybe try again later).
+
+Day-to-day information should probably be logged at around level 100.
+Certainly avoid levels of less than around 50 for non-critical messages.
+Level 10 means that the message is of similar importance to "Government
+declares war". Level 0 is of similar importance to "Armageddon imminent."
+Level 255 is of similar importance to "Water detected in ocean". The
+logging output of your program is much more useful if prorities are
+used well.
+
+
+============================================================================
+Log names
+----------------------------------------------------------------------------
+
+Log names are used as the leafnames to store the logs as, so they must
+comply with the rules for RISC OS leafnames. They must also not be longer
+than ten characters.
+
+It is intended that each application have its own log, so an obvious choice
+for the log name is the application name (without the '!'). Very large
+applications could have more than one log file - in which case the naming
+scheme is unspecified. Try and choose sensible log names.
+
+If your application is going to be distributed, you should write to
+support@doggysoft.co.uk, to request that your log name be formally
+allocated. This will hopefully avoid having more than one program using the
+same log file.
+
+The following log names are reserved for internal use:
+
+  any name beginning with a '-' character
+  any name beginning with "SysLog"
+  "Old"
+
+
+============================================================================
+OS commands
+----------------------------------------------------------------------------
+
+*SysLog <log name> <priority> <message>
+ ------
+
+Adds a time-stamped message to the log file, if and only if the specified
+log file is set up to log messages of this priority. The priority must be in
+the range 0-255.
+
+
+*SysLog <log name> <new priority>
+ ------
+
+Temporarily (but with immediate effect) changes the logging priority of the
+specified log. The priority must be in the range 0-256.
+
+
+*SysLog ON|OFF
+ ------
+
+*SysLog OFF will temporary disable SysLog - all log messages received after
+this command is issued will be ignored. *SysLog ON resumes normal operation.
+
+
+*SysLog_Flush ON|OFF
+ ------------
+
+*SysLog_Flush with no paramaters flushes all currently open log files to
+disk. If it used with the parameter 'ON' then it causes all log files to be
+flushed immediately after each message is written to them. *SysLog_Flush OFF
+disables this behaviour. (This is intended for use when the a program is
+being debugged, and keeps crashing the computer. With SysLog_Flush ON,
+you're guaranteed that all the log information your program produces before
+it crashes will actually be available after a re-boot. It also makes logging
+*very slow*.)
+
+
+============================================================================
+SWIs
+----------------------------------------------------------------------------
+
+SysLog_LogMessage (&4C880)
+-----------------
+R0-> log name, or = session log handle
+R1-> text to log
+R2 = priority
+
+Adds a time-stamped message to the log file, if and only if the specified
+log file is set up to log messages of this priority. The text to log must
+not be longer than 1024 bytes. The priority must be in the range 0-255.
+
+
+SysLog_GetLogLevel (&4C881)
+------------------
+R0-> log name, or = session log handle
+exit:
+R0 = priority
+
+Reads the logging level for the specified log. Messages of *less than* the
+returned priority are being logged. This can be used to avoid creation of
+logging information that is only going to be discarded by SysLog_LogMessage
+anyway. In some cases it could even be used to decide which version of
+a program to load (e.g. whether to load a debugging version of TermiteIP).
+
+
+SysLog_FlushLog (&4C882)
+---------------
+R0-> log name, or = session log handle, or = 0 to flush all logs
+
+Ensures the specified log (or all logs) are fully written to disk, and the
+files closed. This can be useful to make sure that the user is immediately
+able to read data that has just been written to the log.
+
+
+SysLog_SetLogLevel (&4C883)
+------------------
+R0-> log name, or = session log handle
+R1 = new logging level
+
+Sets the logging level for the specified log. This SWI is provided for
+debugging and internal use only, and SHOULD NOT BE USED in distribution
+code. The logging level is the user's decision, not the programmer's.
+
+
+SysLog_LogUnstamped (&4C884)
+-------------------
+R0-> log name, or = session log handle
+R1-> text to log
+R2 = priority
+
+Adds a message to the log file, if and only if the specified log file is set
+to log messages of this priority. The text to log must not be longer than
+1024 bytes. The priority must be in the range 0-255. It is recommended that
+you use SysLog_LogMessage for all normal log entries.
+
+
+SysLog_Indent (&4C885)
+-------------
+R0-> log name, or = session log handle
+
+Increments the log indent level. In log lines generated by
+SysLog_LogMessage, there are <indent_level + 1> spaces in between the
+priority and the message. This can be useful to show the hierarchy of the
+functions which are producing logging output. The indent level is initially
+zero.
+
+
+SysLog_UnIndent (&4C886)
+---------------
+R0-> log name, or = session log handle
+
+Decrements the log indent level. (If it is zero it is not decremented.)
+
+
+SysLog_NoIndent (&4C887)
+---------------
+R0-> log name, or = session log handle
+
+Sets the log indent level to zero. This should be called when your program
+loads, if you are using SysLog_Indent/UnIndent.
+
+
+SysLog_OpenSessionLog (&4C888)
+---------------------
+R0-> log name
+R1 = priority
+exit:
+R0 = session log handle (or 0)
+
+Creates a temporary session log file. When the session log is closed (using
+SysLog_CloseSessionLog, below), the session log is appended to the main log
+as specified in R0 on entry to this SWI. If the main log is set to ignore
+log entries of the priority specified then zero will be returned for the
+session log handle. This does not necessarily require special case code, as
+other SWIs which accept session log handles will accept a handle of zero and
+do nothing.
+
+
+SysLog_CloseSessionLog (&4C889)
+----------------------
+R0 = session log handle
+
+Closes the specified temporary session log and appends it to the appropriate
+main log file. The specified session log handle is no longer valid.
+
+
+SysLog_LogData (&4C88A)
+--------------
+R0-> log name, or = session log handle
+R1 = priority
+R2-> data to log
+R3 = number of bytes to log
+R4 = value to report as block offset (-1 not to show block offset)
+
+Logs a block of data, in a hex-and-ASCII format similar to that produced by
+*Dump. The block offset is the value that is printed at the beginning of
+each line, which is equal to the value given on entry plus the number of
+bytes already displayed. If -1 is used as the block offset then the field
+will be omitted. Note that if the number of bytes to log is over 10KB then
+the SWI will return with an error - logging such a large amount of data in
+one go is almost certainly a bug, so SysLog faults it to prevent the
+computer going into a semi-infinite loop while it writes huge amounts of
+data to disk.
+
+
+SysLog_LogFormatted (&4C88B)
+-------------------
+R0-> log name, or = session log handle
+R1-> format string
+R2 = priority
+R3-> block containing R0-R3,R8-R12,R14
+R4-R7 = parameters
+
+Evaluates a formatted string using registers R4-R7, and R0-R3, R8-R12 and
+R14 from the block passed in R3, and logs the result. See the section
+"LogFormatted", below.
+
+
+SysLog_ReadErrorMessage (&4C88C)
+-----------------------
+R0 = error number
+exit:
+R0-> error message
+
+Converts an error number as returned by the FreeNet/Internet/etc modules
+into a string describing the error. e.g. SysLog_ReadErrorMessage 60 would
+return "Connection timed out".
+
+
+SysLog_LogComplete (&4C88D)
+------------------
+R0-> log name
+
+Flushes the specified log, and de-allocates the buffer associated with it.
+This should only be called if the log is definitely not going to be used for
+a while (e.g. if your application is the only one which can be writing to
+the log, and it's exiting). If this isn't called explicity, SysLog
+automatically de-allocates the log buffer after ten minutes of inactivity in
+the log.
+
+
+SysLog_IRQMode (&4C88E)
+--------------
+R0 = 0 to disable IRQ mode, 1 to enable IRQ mode
+
+Enables or disables IRQ mode. See the section "IRQ Mode", below.
+
+
+============================================================================
+IRQ Mode
+----------------------------------------------------------------------------
+
+If IRQ mode is enabled, you may call SysLog_LogMessage, SysLog_LogUnstamped,
+SysLog_LogData and SysLog_LogFormatted from within interrupt code. Normally
+you would not expect to be able to call these SWIs in this situation because
+the filing system might be threaded.
+
+In IRQ mode, the buffers are not flushed if they become full, so you are
+guaranteed to be able to call the SWIs without Bad Things happening (all
+they will be doing is writing to memory). If the buffers are full, however,
+then log messages will be lost.
+
+If log messages are lost due to the buffers becoming full then a line to
+this effect will be added to the log at the next opportunity.
+
+Do try to ensure that you call SysLog_IRQMode to disable IRQ mode when
+you are exiting the interrupt code, otherwise other applications may have
+their log messages lost unnecessarily. SysLog maintains a counter of how
+man times IRQ mode has been enabled and disabled, and only genuinely
+disables it when the counter is zero.
+
+SysLog_GetLogLevel, SysLog_Indent, SysLog_UnIndent, SysLog_NoIndent and
+SysLog_ReadErrorMessage may always be called from interrupt code. Other
+SysLog SWIs may never be called from interrupt code.
+
+
+============================================================================
+LogFormatted
+----------------------------------------------------------------------------
+
+SWI SysLog_LogFormatted provides C "printf"-style functionality for
+assembler programmers. A format string is passed in R1, which is a template
+for the output. The string is copied directly to the output, except for '%'
+characters, which inserts a string calculated when the SWI is called:
+
+        %%      - the literal '%' character
+        %<reg>a - the network-byte-ordered IP address in register <reg>
+        %<reg>c - the character in register <reg>
+        %<reg>d - the signed decimal integer in register <reg>
+        %<reg>e - the message for the FreeNet error number in register <reg>
+        %<reg>f - the filename of the file handle in register <reg>
+        %<reg>p - the object pointed to by register <reg>
+        %<reg>s - the control-terminated string pointed to by register <reg>
+        %<reg>x - the unsigned hexadecimal integer in register <reg>
+        %<reg>z - the zero-terminated string pointed to by register <reg>
+
+   where <reg> is a number which can be any of 0 to 12 or 14.
+
+Note that the %<reg>p type must be followed by another type indicator. For
+example, to log a character pointed to by register R3, use "%3pc". More than
+one 'p' can be used to indicate more than one level of indirection.
+
+Null pointers are explicitly checked for wherever used, and the string
+"(null)" is logged in place of whatever should have been output. Hence it
+is explicity defined that it is safe to allow null pointers to be in
+registers used by the format string.
+
+Registers R4-R7 are taken directly from the registers passed to the SWI.
+Registers R0-R3, R8-R12 and R14 are taken from the block passed in R3.
+
+It is expected that this SWI would be packaged in a macro in your assembler
+source code. For example:
+
+...
+.stricmp
+  FNlogf("stricmp: comparing %0z and %1z",200)
+...
+
+DEF FNlogf(t$,p%)
+  [OPT p
+    STMFD   R13!,{R0-R3,R8-R12,R14}
+    ADR     R0,txt_logname
+    ADD     R1,R15,#12
+    MOV     R2,#p%
+    MOV     R3,R13
+    SWI     "SysLog_LogFormatted"
+    B       P%+(LENt$+8)ANDNOT3
+    EQUS    t$+STRING$(4-(LENt$AND3),CHR$0)
+    LDMFD   R13!,{R0-R3,R8-R12,R14}
+  ]
+=p
+
+or the ObjAsm equivalent:
+
+        MACRO
+        LOGF    $t,$p
+
+        STMFD   R13!,{R0-R3,R8-R12,R14}
+        ADR     R0,txt_logname
+        ADR     R1,%ft90
+        MOV     R2,#$p
+        MOV     R3,R13
+        SWI     SysLog_LogFormatted
+        B       %ft91
+90
+        =       "$t",0
+        ALIGN
+91      LDMFD   R13!,{R0-R3,R8-R12,R14}
+        MEND
+
+...
+stricmp ROUT
+        LOGF    "stricmp: comparing %0z and %1z",200
+...
+
+
+============================================================================
+Using SysLog from C programs
+----------------------------------------------------------------------------
+
+To make SysLog easy to use from C programs, I have written an APCS veneer
+for the module. This takes the form of a "syslog.h" header file which you
+should #include from your C source, and a "syslog.o" object file which you
+should link your program with.
+
+There are two calls for each SWI, one which uses the non-X form and one
+which uses the X form and returns a _kernel_oserror *. The non-X forms are
+generally nicer as values can be returned in the usual manner, rather than
+having to pass a pointer to a location to be filled in with the return code.
+I would suggest only using the X forms when you absolutely must - i.e. in
+module code, etc.
+
+There's also a bonus function "syslogf" (and "xsyslogf") which is like
+"printf" except it outputs to the log. The first two arguments are the
+logname and priority, and the rest are the usual printf arguments (i.e.
+the format string followed by a variable number of arguments).
+
+Note that a temporary buffer is used to hold the string before it is passed
+to the SysLog module and *THIS BUFFER IS ONLY 1024 BYTES LONG*. i.e. you
+must ensure that your format string cannot ever produce more than 1024 bytes
+of output. This is especially important in networking software where the
+input may be coming from a Bad Miscreant who is trying to hack into or crash
+your machine.
+
+The ObjAsm source to the veneer object file is provided. If you make any
+changes which you think people might find useful, or you find any bugs,
+please e-mail me and tell me about it.
+
+Thanks go to Stewart Brodie for assistance with vsprintf ;-).
+
+
+============================================================================
+Options
+----------------------------------------------------------------------------
+
+The options file is stored as !SysLog.Options. Each line of the options file
+specifies the options for a single log. This line is of the format:
+    <logname> [Reserve <size>|NoReserve] [Sessions|NoSessions]
+              [<level> [<max. size>]]
+<size> and <max. size> are specified in kilobytes.
+
+An entry for log "*" is treated as the default values, which are used if
+the log doesn't have a specific entry in the Options file. So, for example,
+to specify "NoSessions" for every log except "NewsBite" you could use:
+  * NoSessions
+  NewsBite Sessions
+
+The options have the following meanings:
+
+  Reserve <size>
+    SysLog will make sure that at least <size> KB of disk space is free for
+    this log, by padding the log file with zeros which are later overwritten
+    by the real log data.
+  NoReserve
+    SysLog won't reserve disk space for this log as described above. This is
+    the default.
+
+  Sessions
+    SysLog will use Session Logs for this log (as described above) where
+    instructed. This is the default.
+  NoSessions
+    Session Logs are disabled for this log, and log entries will appear
+    strictly in chronological order.
+
+  <level>
+    SysLog will ignore log entries for this log which have a priority
+    greater to or equal than this value. The default value is 125.
+
+  <max. size>
+    The log will be moved to the "Old" directory when it becomes larger
+    than this size. The default value is 256KB.
+
+
+============================================================================
+Usage guidelines
+----------------------------------------------------------------------------
+
+Previously in this section I recommended that programs should not fail to
+work if logging is not available. This is reasonable - however there are
+very few reasons that logging will fail, and all of these reasons are very
+likely to cause the main function of the program to fail. I would suggest
+therefore that programs should RMEnsure the SysLog module in their !Run
+files, and then use it as any other SWI.
+
+Errors from SysLog SWIs, while strictly speaking non-fatal for the main
+program, are indicative of something being badly wrong with the system. Use
+'X' SWIs in situations such as modules where you have to, of course, but in
+application code where you have an error handler, you might as well use the
+non-'X' form and treat the errors as you would any other.
+
+Programs which use SysLog should RMEnsure it in their !Run files. The
+suggested lines to use are as follows:
+
+If "<SysLog$Dir>"="" then Error !SysLog application not seen by filer
+RMEnsure SysLog 0.17 Run <SysLog$Dir>.!Run
+RMEnsure SysLog 0.17 Error MyApp needs SysLog 0.17 or later
+
+Note that you must *not* just RMLoad the SysLog module, as it requires its
+Wimp task to be activated, and this will not happen if you just RMLoad the
+module. The module has a two-stage application entry point, so it will
+return immediately when you RMRun it, allowing the !Run file to continue as
+normal.

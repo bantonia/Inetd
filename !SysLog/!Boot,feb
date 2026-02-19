@@ -1,0 +1,4 @@
+Set SysLog$Dir <Obey$Dir>
+Set SysLog$LogDir <Obey$Dir>.Logs
+IconSprites <Obey$Dir>.!Sprites
+If "<SysLog$Path>" = "" Then Set SysLog$Path <SysLog$Dir>.C-veneer.

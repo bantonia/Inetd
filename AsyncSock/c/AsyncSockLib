@@ -1,0 +1,31 @@
+#include "kernel.h"
+
+#define NULL 0
+
+#define AsyncSocket_Allocate   0x52080
+#define AsyncSocket_Deallocate 0x52081
+
+#define AsyncSocket_TASK       0
+
+_kernel_oserror *async_allocate(int *pollword,int sock,int client)
+{
+  _kernel_swi_regs r;
+  _kernel_oserror *err;
+  r.r[0]=(int)pollword;
+  r.r[1]=sock;
+  r.r[2]=client;
+  if ((err=_kernel_swi(AsyncSocket_Allocate,&r,&r))!=NULL)
+    return err;
+  return NULL;
+}
+
+_kernel_oserror *async_deallocate(int sock,int client)
+{
+  _kernel_swi_regs r;
+  _kernel_oserror *err;
+  r.r[0]=sock;
+  r.r[1]=client;
+  if ((err=_kernel_swi(AsyncSocket_Deallocate,&r,&r))!=NULL)
+    return err;
+  return NULL;
+}

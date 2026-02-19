@@ -1,0 +1,22 @@
+# SysLog options file
+
+# Each line of this file is of the format:
+#   <logname> [Reserve <size>|NoReserve] [Sessions|NoSessions]
+#             [<level> [<max. size>]]
+# The <size> and <max. size> are specified in kilobytes.
+
+# The following line is special - it specifies the default values, which
+# will be used if a log's options aren't specifically set.
+
+* NoReserve Sessions 125 256
+
+# Options for specific logs now follow.
+
+Test 125
+NewsBite 125
+NewsBite-d 256 1024
+Users 256
+Fish 256
+Termite NoSessions
+T-PPP NoSessions
+DaemonLog 195

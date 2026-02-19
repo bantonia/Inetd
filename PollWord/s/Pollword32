@@ -1,0 +1,322 @@
+
+XOS_Module   EQU 0x02001e
+
+ AREA |Module$$code|, CODE, READONLY
+
+; Processor Flags and Modes
+Negative_flag    * 1 :SHL: 31
+Zero_flag        * 1 :SHL: 30
+Carry_flag       * 1 :SHL: 29
+Overflow_flag    * 1 :SHL: 28
+IRQ_flag         * 1 :SHL: 27
+FIQ_flag         * 1 :SHL: 26
+User_mode        * 0
+FIQ_mode         * 1
+IRQ_mode         * 2
+SVC_mode         * 3
+
+; Module constants
+SWI_Block             EQU         &52040
+Data_block_size       EQU         &200
+Service_WimpCloseDown EQU         &53
+ErrorBlock            EQU         &815800
+
+; Register names
+swi_number            RN          11
+pw                    RN          12
+
+; Code
+ENTRY
+Module_BaseAddr       DCD         0                                   ; Start code
+                      DCD         init_code          -Module_BaseAddr ; Initialization code
+                      DCD         final_code         -Module_BaseAddr ; Finalization code
+                      DCD         service_call       -Module_BaseAddr ; Service call handler
+                      DCD         title_string       -Module_BaseAddr ; Title string
+                      DCD         help_string        -Module_BaseAddr ; Help string
+                      DCD         0                                   ; Help and Command keyword table
+                      DCD         SWI_Block                           ; SWI chunk base number
+                      DCD         SWI_handler        -Module_BaseAddr ; SWI handler code
+                      DCD         SWI_decoding_table -Module_BaseAddr ; SWI decoding table
+                      DCD         0                                   ; SWI decoding code
+                      DCD         0
+                      DCD         module_flags       -Module_BaseAddr ; Module flags offset
+
+title_string          DCB         "PollWord",0
+help_string           DCB         "Poll Word Manager\t0.04 (30 July 2014) © Bill Antonia",0
+                      ALIGN
+
+module_flags          DCB         1
+
+init_code             stmfd       sp!,{a1-v3,lr}
+                      mov         a1,#6
+                      mov         a4,#Data_block_size
+                      swi         XOS_Module
+                      bvs         __mem_not_allocated
+                      str         a3,[pw]
+                      mvn         a1,#0
+                      mov         a2,#0
+                      mov         a4,#0
+init_loop             str         a1,[a3,a2]
+                      add         a2,a2,#4
+                      str         a4,[a3,a2]
+                      add         a2,a2,#4
+                      cmp         a2,#Data_block_size
+                      blt         init_loop
+                      ldmfd       sp!,{a1-v3,lr}
+__exit_normal         teq         r0,r0
+                      teq         pc,pc
+                      bne         __init_exit_26
+                      mov         pc,lr
+__init_exit_26        movs        pc,lr
+
+__mem_not_allocated   adr         a1,mem_not_allocated
+                      ldmfd       sp!,{a1-v3,lr}
+                      b           __exit_error
+
+final_code            stmfd       sp!,{a1-a4,v1,lr}
+                      cmp         r10,#0
+                      beq         no_dice_i_wosnt_shot
+                      ldr         a3,[pw]
+                      mov         a1,#0
+                      mov         a4,#0
+final_loop            ldr         a2,[a3,a4]
+                      cmn         a2,#1
+                      addne       a1,a1,#1
+                      add         a4,a4,#8
+                      cmp         a4,#Data_block_size
+                      bne         final_loop
+                      cmp         a1,#0
+                      bne         not_free
+                      mov         a1,#7
+                      swi         XOS_Module
+                      teq         r0,r0
+                      teq         pc,pc
+                      bne         __final_exit_26
+                      ldmfd       sp!,{a1-a4,v1,pc}
+__final_exit_26       ldmfd       sp!,{a1-a4,v1,pc}^
+
+mem_not_allocated     DCD         ErrorBlock
+                      DCB         "Memory for PollWord Module not allocated",0
+                      ALIGN
+
+no_dice_i_wosnt_shot  ldmfd       sp!,{a1-a4,v1,lr}
+                      adr         a1,missed
+                      b           __exit_error
+
+missed                DCD         ErrorBlock+1
+                      DCB         "PollWord Module cannot be relocated",0
+                      ALIGN
+
+not_free              ldmfd       sp!,{a1-a4,v1,lr}
+                      adr         a1,module_in_use
+                      b           __exit_error
+
+module_in_use         DCD         ErrorBlock+2
+                      DCB         "PollWord Module in use",0
+                      ALIGN
+
+service_call          cmp         a2,#Service_WimpCloseDown
+                      beq         __do_service
+                      b           __exit_normal
+__do_service          ldr         pw,[pw]
+WimpCloseDown         stmfd       sp!,{a1-a4,lr}
+                      mov         a1,#Data_block_size
+                      mov         a2,#4
+closedown_loop        ldr         a4,[pw,a2]
+                      cmp         a4,a3
+                      beq         my_task_killed
+                      add         a2,a2,#8
+                      cmp         a2,#Data_block_size
+                      blt         closedown_loop
+                      ldmfd       sp!,{a1-a4,lr}
+                      b           __exit_normal
+
+my_task_killed        mov         a4,#0
+                      str         a4,[pw,a2]
+                      mvn         a4,#0
+                      sub         a2,a2,#4
+                      str         a4,[pw,a2]
+                      ldmfd       sp!,{a1-a4,lr}
+                      b           __exit_normal
+
+SWI_handler           ldr         pw,[pw]
+                      cmp         swi_number,#(endofjumptable-jumptable)/4
+                      addcc       pc,pc,swi_number,lsl #2
+                      b           unknownSWIerror
+jumptable             b           pollword_allocate
+                      b           pollword_deallocate
+                      b           pollword_callpollword
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+                      b           reserved
+
+endofjumptable
+
+reserved              mov         pc, lr
+
+unknownSWIerror       adr         a1,errmessg
+                      b           __exit_error
+
+errmessg              DCD         ErrorBlock+3
+                      DCB         "Unknown PollWord SWI",0
+                      ALIGN
+
+pollword_allocate     stmfd       sp!,{a2-a4,lr}
+                      stmfd       sp!,{a1}
+                      mov         a2,#4
+                      mov         a3,pw
+check_allocation_loop ldr         a4,[a3,a2]
+                      cmp         a1,a4
+                      beq         pollword_already_allocated
+                      add         a2,a2,#8
+                      cmp         a2,#Data_block_size
+                      blt         check_allocation_loop
+                      mov         a1,pw
+                      mov         a2,#0
+                      mvn         a3,#0
+allocate_loop         ldr         a4,[a1,a2]
+                      cmp         a3,a4
+                      beq         pollword_allocated
+                      add         a2,a2,#8
+                      cmp         a2,#Data_block_size
+                      bge         pollword_not_allocated
+                      b           allocate_loop
+pollword_allocated    add         a1,a1,a2
+                      mov         a2,#0
+                      str         a2,[a1]
+                      ldmfd       sp!,{a2}
+                      str         a2,[a1,#4]
+                      ldmfd       sp!,{a2-a4,lr}
+                      b           __exit_normal
+
+pollword_already_allocated
+                      ldmfd       sp!,{a1}
+                      ldmfd       sp!,{a2-a4,lr}
+                      adr         a1,pollword_already
+                      b           __exit_error
+
+pollword_already      DCD         ErrorBlock+4
+                      DCB         "A Pollword is already allocated to this task",0
+                      ALIGN
+
+
+pollword_not_allocated ldmfd      sp!,{a1}
+                       ldmfd      sp!,{a2-a4,lr}
+                       adr        a1,no_alloc
+                       b          __exit_error
+
+no_alloc              DCD         ErrorBlock+5
+                      DCB         "Could not allocate a poll word location",0
+                      ALIGN
+
+pollword_deallocate   stmfd       sp!,{a1-a4,lr}
+                      mov         a3,#4
+deallocate_loop       ldr         a4,[pw,a3]
+                      cmp         a4,a1
+                      beq         deallocate_pollword
+                      add         a3,a3,#8
+                      cmp         a3,#Data_block_size
+                      ble         deallocate_loop
+                      ldmfd       sp!,{a1-a4,lr}
+                      adr         a1,not_my_task
+                      b           __exit_error
+
+deallocate_pollword   mov         a2,#0
+                      str         a2,[pw,a3]
+                      sub         a3,a3,#4
+                      mvn         a2,#0
+                      str         a2,[pw,a3]
+                      ldmfd       sp!,{a1-a4,lr}
+                      b           __exit_normal
+
+pollword_callpollword stmfd       sp!,{a1-a4,lr}
+                      mov         a3,#4
+call_pollword_loop    ldr         a4,[pw,a3]
+                      cmp         a4,a1
+                      beq         call_pollword
+                      add         a3,a3,#8
+                      cmp         a3,#Data_block_size
+                      ble         call_pollword_loop
+                      ldmfd       sp!,{a1-a4,lr}
+                      adr         a1,not_my_task
+__exit_error          teq         r0,r0
+                      teq         pc,pc
+                      bne         __exit_26
+                      msr         cpsr_f,#Overflow_flag
+                      mov         pc,lr
+__exit_26             orr         lr,lr,#Overflow_flag
+                      movs        pc,lr
+
+call_pollword         sub         a3,a3,#4
+                      str         a2,[pw,a3]
+                      ldmfd       sp!,{a1-a4,lr}
+                      b           __exit_normal
+
+not_my_task           DCD         ErrorBlock+6
+                      DCB         "Task not managed by PollWord",0
+                      ALIGN
+
+SWI_decoding_table    DCB         "PollWord",0
+                      DCB         "Allocate",0
+                      DCB         "Deallocate",0
+                      DCB         "CallPollWord",0,0
+
+                      END

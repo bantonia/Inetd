@@ -1,0 +1,16 @@
+Installation
+~~~~~~~~~~~~
+
+I use the !Boot application as provided by !Browse and Java CD's and the
+modules appear to work from the following directories.
+PollWord module should be copied to the !System.modules directory
+and AsyncSock module to !System.modules.network directory. If your setup is
+different then you may need to modify the !Run file inside !Inetd.
+
+!SysLog should have been seen/booted before !Inetd is run. So needs to be
+somewhere in the bootup sequence of your machine.
+
+I use INetDB as my resolver. Either INetDB or the Acorn/ANT Resolver has to
+be loaded before.
+
+Otherwise, all should be OK, happy serving!

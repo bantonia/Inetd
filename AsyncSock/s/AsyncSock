@@ -1,0 +1,336 @@
+ ;GET h.swinames
+
+XOS_Module   EQU 0x02001e
+XOS_Claim    EQU 0x02001f
+XOS_Byte     EQU 0x020006
+XOS_Release  EQU 0x020020
+
+ AREA |Module$$code|, CODE, READONLY
+
+; Processor Flags and Modes
+Negative_flag    * 1 :SHL: 31
+Zero_flag        * 1 :SHL: 30
+Carry_flag       * 1 :SHL: 29
+Overflow_flag    * 1 :SHL: 28
+IRQ_flag         * 1 :SHL: 27
+FIQ_flag         * 1 :SHL: 26
+User_mode        * 0
+FIQ_mode         * 1
+IRQ_mode         * 2
+SVC_mode         * 3
+
+; Module constants
+SWI_Block        * &52080
+Data_block_size  * &200
+Service_WimpCloseDown * &53
+ErrorBlock       * &815820
+
+; Register names
+swi_number       RN 11
+pw               RN 12
+
+; Code
+ENTRY
+Module_BaseAddr
+                      DCD      0                                   ; Start code
+                      DCD      init_code          -Module_BaseAddr ; Initialization code
+                      DCD      final_code         -Module_BaseAddr ; Finalization code
+                      DCD      service_call       -Module_BaseAddr ; Service call handler
+                      DCD      title_string       -Module_BaseAddr ; Title string
+                      DCD      help_string        -Module_BaseAddr ; Help string
+                      DCD      0                                   ; Help and Command keyword table
+                      DCD      SWI_Block                           ; SWI chunk base number
+                      DCD      SWI_handler        -Module_BaseAddr ; SWI handler code
+                      DCD      SWI_decoding_table -Module_BaseAddr ; SWI decoding table
+                      DCD      0                                   ; SWI decoding code
+                      DCD      0
+                      DCD      module_flags       -Module_BaseAddr ; Module flags offset
+
+title_string          DCB      "AsyncSocket",0
+help_string           DCB      "Asynchrous Socket Manager\t0.03 (31 July 2014) © Bill Antonia",0
+                      ALIGN
+
+module_flags          DCB         1
+                      ALIGN
+
+init_code             stmfd    sp!,{a1-v3,lr}
+                      mov      a1,#6
+                      mov      a4,#Data_block_size
+                      swi      XOS_Module
+                      ldmvsfd  sp!,{a1-v3,lr}
+                      bvs      claim_failed
+                      str      a3,[pw]
+                      mvn      a1,#0
+                      mov      a2,#0
+init_loop             str      a1,[a3,a2]
+                      add      a2,a2,#4
+                      cmp      a2,#Data_block_size
+                      bne      init_loop
+                      mov      a1,#&10
+                      adr      a2,irq_handler
+                      swi      XOS_Claim
+                      ldmvsfd  sp!,{a1-v3,lr}
+                      bvs      irq_claim_failed
+                      mov      a1,#14
+                      mov      a2,#19
+                      swi      XOS_Byte
+                      ldmfd    sp!,{a1-v3,lr}
+__exit_normal         teq      r0,r0
+                      teq      pc,pc
+                      bne      __init_exit_26
+                      mov      pc,lr
+__init_exit_26        movs     pc,lr
+
+claim_failed          adr      a1,memory_alloc_err
+__exit_error          teq      r0,r0
+                      teq      pc,pc
+                      bne      __exit_26
+                      msr      cpsr_f,#Overflow_flag
+                      mov      pc,lr
+__exit_26             orr      lr,lr,#Overflow_flag
+                      movs     pc,lr
+
+irq_claim_failed      ldr      a3,[pw]
+                      mov      a1,#7
+                      swi      XOS_Module
+                      adr      a1,irq_not_claimed
+                      b        __exit_error
+
+memory_alloc_err      DCD      ErrorBlock
+                      DCB      "AsyncSocket Manager memory not allocated",0
+                      ALIGN
+
+irq_not_claimed       DCD      ErrorBlock+1
+                      DCB      "AsyncSocket Manager irq not claimed",0
+                      ALIGN
+
+final_code            stmfd    sp!,{a1-a3,v1,lr}
+                      ldr      pw,[pw]
+                      mov      a1,#0
+final_check           ldr      a3,[pw,a1]
+                      cmn      a3,#1
+                      bne      disallow_closedown
+                      add      a1,a1,#4
+                      cmp      a1,#Data_block_size
+                      bne      final_check
+                      beq      allow_closedown
+                      
+disallow_closedown    cmp      r10,#0
+                      adreq    a1,missed
+                      ldmeqfd  sp!,{a1-a3,v1,lr}
+                      beq      __exit_error
+                      
+allow_closedown       mov      a1,#13
+                      mov      a2,#19
+                      swi      XOS_Byte
+                      mov      a3,pw
+                      mov      a1,#&10
+                      adr      a2,irq_handler
+                      swi      XOS_Release
+                      ldmvsfd  sp!,{a1-a3,v1,lr}
+                      bvs      bad_irq_release
+                      mov      a1,#7
+                      swi      XOS_Module
+                      ldmvsfd  sp!,{a1-a3,v1,lr}
+                      bvs      memory_release_failed
+                      ldmfd    sp!,{a1-a3,v1,lr}
+                      b        __exit_normal
+
+missed                DCD      ErrorBlock+2
+                      DCB      "AsyncSocket module still in use",0
+                      ALIGN
+
+bad_irq_release       ldr      a3,[pw]
+                      mov      a1,#7
+                      swi      XOS_Module
+                      bvs      memory_release_failed
+                      adr      a1,release_fail
+                      b        __exit_error
+
+memory_release_failed adr      a1,release_fail
+                      b        __exit_error
+
+release_fail          DCD      ErrorBlock+3
+                      DCB      "AsyncSocket module memory release failure",0
+                      ALIGN
+
+
+service_call          teq      a2,#Service_WimpCloseDown
+                      bne      __exit_normal
+                      ldr      pw,[pw]
+WimpCloseDown         stmfd    sp!,{a1-a4,lr}
+                      mov      a1,#Data_block_size
+                      mov      a2,#0
+closedown_loop        ldr      a4,[pw,a2]
+                      cmp      a4,a3
+                      beq      my_task_killed
+                      add      a2,a2,#4
+                      cmp      a2,#Data_block_size
+                      blt      closedown_loop
+                      ldmfd    sp!,{a1-a4,lr}
+                      b        __exit_normal
+
+my_task_killed        mvn      a4,#0
+                      str      a4,[pw,a2]
+                      ldmfd    sp!,{a1-a4,lr}
+                      b        __exit_normal
+
+irq_handler           cmp      a1,#19
+                      bne      __exit_normal
+                      cmp      a2,#4
+                      bge      __exit_normal
+                      stmfd    sp!,{a1-a4}
+                      mov      a4,a3,lsl #2
+                      ldr      a1,[pw,a4]
+                      cmn      a1,#1
+                      beq      skip
+                      ;mov      a4,a2,lsl #8
+                      ;orr      a4,a3,a4        ; byte 0: socket descriptor, byte 1: event subcode
+                                               ; 1:input waiting, 2:urgent event, 3:connection broken
+                      ;str      a4,[a1]
+                      str      a3,[a1]
+                      ldmfd    sp!,{a1-a4}
+                      ldmfd    sp!,{pc}
+skip                  ldmfd    sp!,{a1-a4}
+                      b        __exit_normal
+
+SWI_handler           ldr      pw,[pw]
+                      cmp      swi_number,#(endofjumptable-jumptable)/4
+                      addcc    pc,pc,swi_number,lsl #2
+                      b        unknownSWIerror
+jumptable             b        socket_allocate
+                      b        socket_deallocate
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+                      b        reserved
+
+endofjumptable
+
+reserved              mov      pc, lr
+
+unknownSWIerror       adr      a1,errmessg
+                      b        __exit_error
+
+errmessg              DCD      ErrorBlock+4
+                      DCB      "Unknown AsyncSocket SWI",0
+                      ALIGN
+
+socket_allocate       cmp      a3,#0
+                      bne      tasks_only
+                      stmfd    sp!,{a2,a3,lr}
+                      mov      a2,a2,lsl #2
+                      cmp      a2,#Data_block_size
+                      ldmgtfd  sp!,{a2,a3,lr}
+                      adrgt    a1,socket_out_of_range
+                      bgt      __exit_error
+                      ldr      a3,[pw,a2]
+                      cmn      a3,#1
+                      ldmnefd  sp!,{a2,a3,lr}
+                      adrne    a1,no_alloc
+                      bne      __exit_error
+                      str      a1,[pw,a2]
+                      ldmfd    sp!,{a2,a3,lr}
+                      b        __exit_normal
+                      
+tasks_only            adr      a1,tasks_only_message
+                      b        __exit_error
+
+tasks_only_message    DCD      ErrorBlock+5
+                      DCB      "AsyncSocket currently only support tasks",0
+                      ALIGN
+
+socket_out_of_range   DCD      ErrorBlock+6
+                      DCB      "Asyncrous socket value out of range",0
+                      ALIGN
+
+no_alloc              DCD      ErrorBlock+7
+                      DCB      "Could not allocate asynchrous socket location, in use",0
+                      ALIGN
+
+socket_deallocate     cmp      a2,#0
+                      bne      tasks_only
+                      stmfd    sp!,{a1,a2,lr}
+                      mov      a1,a1,lsl #2
+                      cmp      a1,#Data_block_size
+                      ldmgtfd  sp!,{a1,a2,lr}
+                      adrgt    a1,socket_out_of_range
+                      bgt      __exit_error
+                      ldr      a2,[pw,a1]
+                      cmn      a2,#1
+                      ldmeqfd  sp!,{a1,a2,lr}
+                      adreq    a1,no_dealloc
+                      beq      __exit_error
+                      mvn      a2,#0
+                      str      a2,[pw,a1]
+                      ldmfd    sp!,{a1,a2,lr}
+                      b        __exit_normal
+
+no_dealloc            DCD      ErrorBlock+8
+                      DCB      "Could not deallocate asynchrous socket location, not in use",0
+                      ALIGN
+
+SWI_decoding_table
+                      DCB      "AsyncSocket",0
+                      DCB      "Allocate",0
+                      DCB      "Deallocate",0,0
+
+                      END
