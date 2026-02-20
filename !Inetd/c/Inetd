@@ -25,7 +25,7 @@
 
 #define WimpVersion    310
 
-/*static char *copyright="Inetd version 0.01 ©Bill Antonia 2 July 1998";*/
+/*static char *copyright="Inetd version 0.01 Â©Bill Antonia 2 July 1998";*/
 
 static  WimpPollBlock  poll_block;
 static  MessagesFD     messages;
@@ -439,3 +439,4 @@ int main(int argc, char *argv[]) {
     event_poll(&event_code, &poll_block, (void *)pollword);
   return 0;
 }
+
